@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">Admin Dashboard</h1>
+        <h2 class="mt-4">Users</h2>
+        <table class="table table-bordered mt-3">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Subscription Status</th>
+                    <th>Trial End Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% users.forEach(user => { %>
+                    <tr>
+                        <td><%= user.email %></td>
+                        <td><%= user.subscriptionStatus %></td>
+                        <td><%= user.trialEndDate ? user.trialEndDate.toDateString() : 'N/A' %></td>
+                        <td>
+                            <form action="/admin/add-subscription" method="POST" class="form-inline">
+                                <input type="hidden" name="email" value="<%= user.email %>">
+                                <select name="subscriptionStatus" class="form-control mr-2">
+                                    <option value="active" <%= user.subscriptionStatus === 'active' ? 'selected' : '' %>>Active</option>
+                                    <option value="inactive" <%= user.subscriptionStatus === 'inactive' ? 'selected' : '' %>>Inactive</option>
+                                </select>
+                                <button type="submit" class="btn btn-primary">Update</button>
+                            </form>
+                        </td>
+                    </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

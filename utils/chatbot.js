@@ -1,8 +1,6 @@
 const axios = require('axios');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-
-
+const mongoose = require('mongoose');
 
 /**
  * AI Chatbot class for handling conversations with Google's Gemini model
@@ -130,6 +128,9 @@ class Chatbot {
             const assistantMessage = text;
             this.addMessage('assistant', assistantMessage);
             
+            // Save chat summary to MongoDB
+            await this.saveChatSummaryToMongoDB(message, assistantMessage);
+
             return {
                 message: assistantMessage,
                 status: 'success'
@@ -142,6 +143,21 @@ class Chatbot {
                 error: error.message
             };
         }
+    }
+
+    /**
+     * Save chat summary to MongoDB
+     * @param {string} userMessage - The user's message
+     * @param {string} assistantMessage - The assistant's response
+     */
+    async saveChatSummaryToMongoDB(userMessage, assistantMessage) {
+        const ChatSummary = mongoose.model('ChatSummary', new mongoose.Schema({}, { strict: false }));
+        const chatSummary = new ChatSummary({
+            userMessage: userMessage,
+            assistantMessage: assistantMessage,
+            timestamp: new Date()
+        });
+        await chatSummary.save();
     }
 }
 
