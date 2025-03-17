@@ -1,26 +1,37 @@
-const express = require('express');
-const Chatbot = require('./utils/chatbot.js');
-const axios = require('axios');
-const dotenv = require('dotenv');
-dotenv.config();
+const express = require("express");
+const Chatbot = require("./utils/chatbot.js");
+const axios = require("axios");
+
+require("dotenv").config();
 
 let config = {
-    apiKey: process.env.AI_API_KEY || "AIzaSyBYa0jrExkq70JnZYEPGtc5byT3w3SFwpY",
-    model: 'gemini-2.0-flash',
-    temperature: 0.7,
-    maxTokens: 1000,
-    maxHistoryLength: 10,
-    systemMessage: 'You are a helpful assistant.'
-}
+  apiKey: process.env.AI_API_KEY,
+  model: "gemini-2.0-flash",
+  temperature: 0.7,
+  maxTokens: 1000,
+  maxHistoryLength: 10,
+  systemMessage: `
+    คุณกำลังจำลองบทบาทเป็นร้านอาหารตามสั่งและก๋วยเตี๋ยว โดยมีหน้าที่สอบถามและรับออเดอร์จากลูกค้าให้ครบถ้วน ให้ทำตามขั้นตอนดังนี้:
+
+1. ถามรายละเอียดอาหารที่สั่ง:
+- 1.1 ถามว่าลูกค้าต้องการ "พิเศษ" อะไรบ้าง (เช่น พิเศษข้าว, พิเศษหมู หรือพิเศษทั้งหมด)
+- 1.2 สำหรับอาหารแต่ละรายการ ให้สอบถามว่าต้องการใส่หรือไม่ใส่ส่วนผสมอะไรบ้าง
+- 1.3 ถามจำนวนที่ต้องการสั่ง (เช่น กี่ชิ้น หรือกี่กล่อง)
+
+2. ถามว่าลูกค้าต้องการให้จัดส่งที่อยู่หรือจะมารับที่ร้าน
+
+3. ถามเบอร์ติดต่อผู้รับออเดอร์
+
+4. ถามชื่อผู้รับออเดอร์
+
+5. ยืนยันออเดอร์: สรุปข้อมูลที่ลูกค้าได้ให้ไว้ทั้งหมด และถามลูกค้าว่าถูกต้องหรือไม่ก่อนดำเนินการต่อ
+
+โปรดดำเนินการถามทีละขั้นตอนและตรวจสอบให้แน่ใจว่าลูกค้าได้ตอบครบถ้วนทุกข้อก่อนยืนยันออเดอร์
+`,
+};
 
 // Initialize chatbot
 const bot = new Chatbot(config);
-
-
-
-
-
-
 
 const app = express();
 const PORT = process.env.PORT || 4001;
@@ -30,36 +41,68 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.post('/webhook', async (req, res) => {
-    console.log(req.body.events[0].message.text);
+app.post("/webhook", async (req, res) => {
+  console.log(req.body.events[0].message.text);
 
-    
-    console.log(bot.conversationHistory);
+  console.log(bot.conversationHistory);
 
-    const response = await bot.sendMessage(req.body.events[0].message.text);
+  const response = await bot.sendMessage(req.body.events[0].message.text);
 
-    await axios.post("https://api.line.me/v2/bot/message/reply", {
-        replyToken: req.body.events[0].replyToken,
-        messages: [
-            {
-                type: 'text',
-                text: response.message || 'Sorry, I did not understand that.'
-            }
-        ]
-    }, {
-        headers: {
-            'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json'
-        }
-    });
+  await axios.post(
+    "https://api.line.me/v2/bot/message/reply",
+    {
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "text",
+          text: response.message || "Sorry, I did not understand that.",
+        },
+      ],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
 
+  res.json({
+    status: "success",
+    message: "Webhook received",
+  });
+});
+
+app.post("/chat", async (req, res) => {
+  try {
+    // Get the message from the request body
+    const message = req.body.message;
+
+    if (!message) {
+      return res.status(400).json({
+        status: "error",
+        message: "No message provided",
+      });
+    }
+
+    // Send the message to the chatbot
+    const response = await bot.sendMessage(message);
+
+    // Return the bot's response
     res.json({
-        status: 'success',
-        message: 'Webhook received'
+      status: "success",
+      response: response.message || "Sorry, I did not understand that.",
     });
+  } catch (error) {
+    console.error("Error processing chat message:", error);
+    res.status(500).json({
+      status: "error",
+      message: "An error occurred while processing your message",
+    });
+  }
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

@@ -1,11 +1,13 @@
-const axios = require('axios');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+const { PostgresChatMessageHistory } = require("@langchain/community/stores/message/postgres");
+const { ConversationChain } = require("langchain/chains");
+const { BufferMemory } = require("langchain/memory");
+const { ChatPromptTemplate, MessagesPlaceholder } = require("@langchain/core/prompts");
 
-
-
+require('dotenv').config();
 
 /**
- * AI Chatbot class for handling conversations with Google's Gemini model
+ * AI Chatbot class using LangChain and PostgreSQL memory
  */
 class Chatbot {
     /**
@@ -19,23 +21,73 @@ class Chatbot {
         this.maxTokens = config.maxTokens || 1000;
         this.maxHistoryLength = config.maxHistoryLength || 10;
         this.systemMessage = config.systemMessage || 'You are a helpful assistant.';
-        this.genAI = new GoogleGenerativeAI(this.apiKey);
-        this.AImodel = this.genAI.getGenerativeModel({ model: this.model});
+        this.sessionId = config.sessionId || `session_${Date.now()}`;
         
-        // Build complete API endpoint with API key
-        this.apiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+        // Database configuration for PostgreSQL
+        this.dbConfig = config.dbConfig || {
+            connectionString: process.env.DATABASE_URL,
+            tableName: 'chat_messages'
+        };
         
-        // Initialize with system message
-        this.conversationHistory = [{ role: 'system', content: this.systemMessage }];
+        // Initialize LangChain components
+        this._setupLangChainComponents();
+    }
+
+    /**
+     * Setup LangChain model, memory, and chain
+     * @private
+     */
+    _setupLangChainComponents() {
+        console.log(this.dbConfig)
+
+        // Initialize the model
+        this.llm = new ChatGoogleGenerativeAI({
+            apiKey: this.apiKey,
+            modelName: this.model,
+            temperature: this.temperature,
+            maxOutputTokens: this.maxTokens,
+        });
+        
+        // Initialize PostgreSQL chat history
+        this.messageHistory = new PostgresChatMessageHistory({
+            sessionId: this.sessionId,
+            poolConfig: this.dbConfig
+        });
+        
+        // Create memory using the PostgreSQL history
+        this.memory = new BufferMemory({
+            chatHistory: this.messageHistory,
+            returnMessages: true,
+            memoryKey: "history",
+            inputKey: "input",
+        });
+
+        // Create a chat prompt template
+        const prompt = ChatPromptTemplate.fromMessages([
+            ["system", this.systemMessage],
+            new MessagesPlaceholder("history"),
+            ["human", "{input}"]
+        ]);
+        
+        // Create the conversation chain
+        this.chain = new ConversationChain({
+            llm: this.llm,
+            memory: this.memory,
+            prompt,
+        });
     }
 
     /**
      * Reset the conversation history with a system message
      * @param {string} systemMessage - Optional new system message
      */
-    initialize(systemMessage = null) {
-        if (systemMessage) this.systemMessage = systemMessage;
-        this.conversationHistory = [{ role: 'system', content: this.systemMessage }];
+    async initialize(systemMessage = null) {
+        if (systemMessage) {
+            this.systemMessage = systemMessage;
+            this._setupLangChainComponents();
+        }
+        
+        await this.messageHistory.clear();
         return this;
     }
 
@@ -44,98 +96,44 @@ class Chatbot {
      * @param {string} role - The role ('user' or 'assistant')
      * @param {string} content - The message content
      */
-    addMessage(role, content) {
-        this.conversationHistory.push({ role, content });
-        this._trimHistory();
-        return this;
-    }
-
-    /**
-     * Trim the conversation history to prevent it from growing too large
-     */
-    _trimHistory() {
-        if (this.conversationHistory.length > this.maxHistoryLength + 1) {
-            const systemMessages = this.conversationHistory.filter(msg => msg.role === 'system');
-            const nonSystemMessages = this.conversationHistory
-                .filter(msg => msg.role !== 'system')
-                .slice(-(this.maxHistoryLength));
-            
-            this.conversationHistory = [...systemMessages, ...nonSystemMessages];
+    async addMessage(role, content) {
+        if (role === 'user') {
+            await this.messageHistory.addUserMessage(content);
+        } else if (role === 'assistant') {
+            await this.messageHistory.addAIMessage(content);
+        } else if (role === 'system') {
+            this.systemMessage = content;
+            this._setupLangChainComponents();
         }
+        return this;
     }
 
     /**
      * Get the current conversation history
      */
-    getHistory() {
-        return [...this.conversationHistory];
-    }
-    
-    /**
-     * Convert internal conversation history to Gemini API format
-     * @returns {Array} Formatted contents for Gemini API
-     */
-    _formatConversationForGemini() {
-        const contents = [];
-        
-        // Start with a system message if available
-        const systemMessage = this.conversationHistory.find(msg => msg.role === 'system');
-        if (systemMessage) {
-            contents.push({
-                role: "user",
-                parts: [{ text: `System instruction: ${systemMessage.content}` }]
-            });
-        }
-        
-        // Add the conversation messages, pairing user and assistant messages
-        const messages = this.conversationHistory.filter(msg => msg.role !== 'system');
-        for (const message of messages) {
-            contents.push({
-                role: message.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: message.content }]
-            });
-        }
-        
-        return contents;
+    async getHistory() {
+        const messages = await this.messageHistory.getMessages();
+        return messages.map(msg => ({
+            role: msg._getType() === 'human' ? 'user' : 'assistant',
+            content: msg.content
+        }));
     }
 
     /**
      * Send a message to the AI and get a response
      * @param {string} message - The user message
-     * @param {Object} options - Optional parameters to override defaults
      */
-    async sendMessage(message, options = {}) {
-        this.addMessage('user', message);
-
+    async sendMessage(message) {
         try {
-            // Add current message to conversation and format for Gemini
-            const contents = this._formatConversationForGemini();
-            
-            // Send the request to the Gemini API
-            const chatbot = this.AImodel.startChat({
-                history: contents,
-                generationConfig: {
-                    maxOutputTokens: 1000,
-                  },
-            })
-
-
-            const result = await chatbot.sendMessage(message);
-
-            const response = await result.response;
-
-            const text = response.text();
-
-            // Extract the text from the response
-            const assistantMessage = text;
-            this.addMessage('assistant', assistantMessage);
+            const response = await this.chain.invoke({ input: message });
+ 
             
             return {
-                message: assistantMessage,
+                message: response.response,
                 status: 'success'
             };
         } catch (error) {
-            console.error('Error communicating with Google AI service:', error);
+            console.error('Error communicating with LLM service:', error);
             return {
                 message: 'Sorry, I encountered an error while processing your request.',
                 status: 'error',
