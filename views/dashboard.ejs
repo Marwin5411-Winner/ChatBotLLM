@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard</title>
+</head>
+<body>
+    <h1>User Dashboard</h1>
+    <p>Subscription Status: <%= subscriptionStatus %></p>
+    <form action="/auth/subscribe" method="POST">
+        <input type="hidden" name="userId" value="<%= userId %>">
+        <label for="paymentMethodId">Payment Method ID:</label>
+        <input type="text" id="paymentMethodId" name="paymentMethodId" required>
+        <button type="submit">Subscribe</button>
+    </form>
+</body>
+</html>
